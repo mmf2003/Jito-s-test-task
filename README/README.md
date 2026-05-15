@@ -111,12 +111,3 @@ NODE
 
 The command should finish without crashing on all files in `html_samples`.
 
-## AI usage
-
-AI assistance was used during implementation. The required conversation link should be added to:
-
-```txt
-ai_help/chatgpt_chat.txt
-```
-
-Before submitting, replace the placeholder in that file with a public ChatGPT share link and verify that the link opens in incognito mode.
