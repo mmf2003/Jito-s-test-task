@@ -60,6 +60,10 @@ A root wrapper is used because valid HTML input can contain several top-level no
 - Common HTML entities such as `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`, `&copy;`
 - Numeric entities such as `&#169;` and `&#xA9;`
 
+- If a closing tag does not match any currently open element,
+  it is ignored. This keeps the parser from crashing and preserves
+  the already parsed tree.
+  
 ## Robustness decisions
 
 The function does not throw on malformed or surprising input. If closing tags are mismatched, it closes the nearest matching element in the internal stack and continues. If a tag cannot be parsed safely, the parser treats it as text or skips the problematic declaration.

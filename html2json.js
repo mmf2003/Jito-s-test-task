@@ -177,13 +177,17 @@ function html2json(htmlText) {
   }
 
   function closeElement(tagName) {
-    for (let index = stack.length - 1; index > 0; index -= 1) {
-      if (stack[index].tag === tagName) {
-        stack.length = index;
-        return;
-      }
+  const normalizedTagName = tagName.toLowerCase();
+
+  for (let index = stack.length - 1; index > 0; index -= 1) {
+    if (stack[index].tag === normalizedTagName) {
+      stack.length = index;
+      return;
     }
   }
+
+  // Unknown closing tag is ignored intentionally.
+}
 
   function consumeRawTextContent(tagName, startPosition) {
     const closeTagPattern = new RegExp(`</\\s*${escapeRegExp(tagName)}\\s*>`, "i");
