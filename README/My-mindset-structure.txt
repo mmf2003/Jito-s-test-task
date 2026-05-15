@@ -1,0 +1,30 @@
+Since my current knowledge is not yet sufficient to complete this task independently, and the use of AI is not prohibited by the assignment requirements, this is where I started. (At the moment, I am still studying Fullstack JavaScript development.)
+
+## Stages of completing the test assignment, logic, and thought process:
+
+1. I carefully read the assignment, analyzed it with the help of AI, drew conclusions, and created an initial implementation plan for myself.
+
+2. I studied what a JSON structure (tree structure) is, described how my function should work, and researched the restrictions on using certain tools according to the assignment requirements.
+
+3. I encountered the question of creating a root element as a “super-parent.” I found out that such a structure is not prohibited, and additionally it reduces the number of required checks and makes the code more readable.
+
+4. I started identifying potential future issues in the code — unclosed tags, comments, `!DOCTYPE`, and malformed HTML. One of the most important requirements was that the code must not crash even with invalid HTML. After that, I began implementing the solution.
+
+5. A project structure was created according to the assignment requirements. Example pages were also added.
+
+6. After identifying bugs and reviewing multiple opinions and approaches, I proceeded with fixing the issues.
+
+7. I performed manual testing. After discovering additional issues, the entire function was reviewed again. Then I conducted cross-testing with different examples.
+
+8. I reviewed and documented the final result.
+
+9. I added the `my-mindset-structure` file, reports about the use of other AI tools, and a sped-up video of the work process.
+
+10. All links were tested and work correctly in incognito mode.
+
+## Final Result:
+
+1. `index.html` was left unchanged.
+2. Example files were added and tested.
+3. More complex examples also passed the tests.
+4. The original examples provided in the assignment were also kept and tested.
