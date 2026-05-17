@@ -13,7 +13,8 @@ The function always returns a root wrapper:
 ```js
 {
   type: "root",
-  children: []
+  children: [],
+  warnings: []
 }
 ```
 
@@ -47,6 +48,21 @@ A root wrapper is used because valid HTML input can contain several top-level no
 <p>Description</p>
 ```
 
+```md
+## Warnings and error reporting
+
+The parser collects non-critical parsing problems in the `warnings` array instead of throwing errors.
+
+Each warning has this structure:
+
+```js
+{
+  message: "Broken tag without closing >",
+  line: 5,
+  column: 12
+}
+```
+
 ## Supported cases
 
 - Nested HTML elements
@@ -61,8 +77,7 @@ A root wrapper is used because valid HTML input can contain several top-level no
 - Numeric entities such as `&#169;` and `&#xA9;`
 
 - If a closing tag does not match any currently open element,
-  it is ignored. This keeps the parser from crashing and preserves
-  the already parsed tree.
+  the parser adds a warning and continues.
   
 ## Robustness decisions
 
@@ -109,5 +124,5 @@ for (const file of fs.readdirSync("./html_samples")) {
 NODE
 ```
 
-The command should finish without crashing on all files in `html_samples`.
+The implementation was iteratively improved and tested against simple, nested, malformed, and edge-case HTML samples.
 
