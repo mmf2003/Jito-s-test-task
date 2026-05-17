@@ -22,9 +22,27 @@ Since my current knowledge is not yet sufficient to complete this task independe
 
 10. All links were tested and work correctly in incognito mode.
 
+11. I decided to add warnings for malformed HTML. UI highlighting was also added. After additional testing, several issues that caused some parts of the code to merge incorrectly were fixed. I also implemented error reporting with line and column information to improve the readability of warnings. 
+
+12. Cross-tests were performed between different AI agents (GROK, Codex, GPT, Kimi). I analyzed their responses and applied the final improvements based on the results.
+
 ## Final Result:
 
-1. `index.html` was left unchanged.
+1. `index.html` was left mostly unchanged, except for minor visual improvements and warnings display.
 2. Example files were added and tested.
-3. More complex examples also passed the tests.
+3. More complex and malformed HTML examples also passed the tests.
 4. The original examples provided in the assignment were also kept and tested.
+5. The parser does not use `DOMParser`, `innerHTML`, or any third-party parsing libraries.
+6. A warnings system was implemented to handle malformed HTML without crashing.
+7. Warning messages include line and column information for easier debugging.
+8. The UI highlights parsing results:
+   - light green if no warnings are found
+   - light red if warnings are detected
+9. Recovery logic was added for malformed structures such as:
+   - broken tags
+   - unknown closing tags
+   - implicitly closed tags
+   - unclosed raw-text tags
+10. Multiple edge cases and stress tests were performed to improve parser stability.
+11. AI usage documentation, test artifacts, and conversation links were added according to the task requirements.
+12. Cross-testing and comparison were performed using multiple AI assistants (GPT, Codex, GROK, and Kimi) to validate edge-case handling and parser behavior.
