@@ -6,6 +6,10 @@ function convertHtml2JsonAndSet() {
     htmlTextAreaValue
   );
 
+  renderResult(jsonObj);
+}
+
+function renderResult(jsonObj) {
   const jsonArea =
     document.getElementById("json");
 
@@ -24,12 +28,14 @@ function convertHtml2JsonAndSet() {
   ) {
     warningArea.textContent =
       "Warnings:\n\n" +
-      jsonObj.warnings.join("\n");
+      jsonObj.warnings
+        .map(formatWarning)
+        .join("\n");
 
     warningArea.style.color = "red";
 
     jsonArea.style.backgroundColor =
-      "#d9b8b8";
+      "#ffe6e6";
   } else {
     warningArea.textContent =
       "No warnings";
@@ -39,6 +45,17 @@ function convertHtml2JsonAndSet() {
     jsonArea.style.backgroundColor =
       "#e8ffe8";
   }
+}
+
+function formatWarning(warning) {
+  if (
+    warning &&
+    typeof warning === "object"
+  ) {
+    return `[Line ${warning.line}, Col ${warning.column}] ${warning.message}`;
+  }
+
+  return String(warning);
 }
 
 function html2json(htmlText) {
@@ -53,7 +70,7 @@ function html2json(htmlText) {
   ]);
 
   const RAW_TEXT_TAGS = new Set([
-    "script", "style", "textarea", 
+    "script", "style", "textarea", "title",
   ]);
 
   const PRESERVE_WHITESPACE_TAGS = new Set([
@@ -85,7 +102,7 @@ function html2json(htmlText) {
       const commentEnd = input.indexOf("-->", nextTagStart + 4);
 
       if (commentEnd === -1) {
-        addWarning("Unclosed HTML comment");
+        addWarning("Unclosed HTML comment", nextTagStart);
       }
 
       position = commentEnd === -1 ? input.length : commentEnd + 3;
@@ -105,7 +122,7 @@ function html2json(htmlText) {
       });
 
       if (cdataEnd === -1) {
-        addWarning("Unclosed CDATA section");
+        addWarning("Unclosed CDATA section", nextTagStart);
       }
 
       position = cdataEnd === -1 ? input.length : cdataEnd + 3;
@@ -116,7 +133,7 @@ function html2json(htmlText) {
       const declarationEnd = findTagEnd(input, nextTagStart + 2);
 
       if (declarationEnd === -1) {
-        addWarning("Unclosed declaration");
+        addWarning("Unclosed declaration", nextTagStart);
       }
 
       position = declarationEnd === -1 ? input.length : declarationEnd + 1;
@@ -127,7 +144,7 @@ function html2json(htmlText) {
       const instructionEnd = input.indexOf("?>", nextTagStart + 2);
 
       if (instructionEnd === -1) {
-        addWarning("Unclosed processing instruction");
+        addWarning("Unclosed processing instruction", nextTagStart);
       }
 
       position = instructionEnd === -1 ? input.length : instructionEnd + 2;
@@ -150,7 +167,7 @@ function html2json(htmlText) {
         : findUnquotedLessThan(input, nextTagStart + 1, tagEnd);
 
     if (tagEnd === -1 || nestedTagStart !== -1) {
-      addWarning("Broken tag without closing >");
+      addWarning("Broken tag without closing >", nextTagStart);
 
       if (nestedTagStart !== -1) {
         appendText(input.slice(nextTagStart, nestedTagStart));
@@ -167,7 +184,7 @@ function html2json(htmlText) {
       .trim();
 
     if (!rawTagContent) {
-      addWarning("Empty tag was treated as text");
+      addWarning("Empty tag was treated as text", nextTagStart);
       appendText(input.slice(nextTagStart, tagEnd + 1));
 
       position = tagEnd + 1;
@@ -178,9 +195,9 @@ function html2json(htmlText) {
       const closingTagName = readTagName(rawTagContent.slice(1)).toLowerCase();
 
       if (closingTagName) {
-        closeElement(closingTagName);
+        closeElement(closingTagName, nextTagStart);
       } else {
-        addWarning("Invalid closing tag was ignored");
+        addWarning("Invalid closing tag was ignored", nextTagStart);
       }
 
       position = tagEnd + 1;
@@ -190,7 +207,7 @@ function html2json(htmlText) {
     const parsedTag = parseOpeningTag(rawTagContent);
 
     if (!parsedTag) {
-      addWarning(`Invalid tag was treated as text: <${rawTagContent}>`);
+      addWarning(`Invalid tag was treated as text: <${rawTagContent}>`, nextTagStart);
       appendText(input.slice(nextTagStart, tagEnd + 1));
 
       position = tagEnd + 1;
@@ -202,6 +219,7 @@ function html2json(htmlText) {
       tag: parsedTag.tagName,
       attributes: parsedTag.attributes,
       children: [],
+      position: getLineAndColumn(input, nextTagStart),
     };
 
     currentParent().children.push(element);
@@ -222,9 +240,20 @@ function html2json(htmlText) {
 
   if (stack.length > 1) {
     for (let index = stack.length - 1; index > 0; index -= 1) {
-      addWarning(`Unclosed tag: <${stack[index].tag}>`);
+      const elementPosition = stack[index].position || {
+        line: 1,
+        column: 1,
+      };
+
+      root.warnings.push({
+        message: `Unclosed tag: <${stack[index].tag}>`,
+        line: elementPosition.line,
+        column: elementPosition.column,
+      });
     }
   }
+
+  removeInternalPositions(root);
 
   return root;
 
@@ -232,45 +261,63 @@ function html2json(htmlText) {
     return stack[stack.length - 1];
   }
 
-  function addWarning(message) {
-    root.warnings.push(message);
-  }
+  function addWarning(message, positionIndex = position) {
+    const location = getLineAndColumn(input, positionIndex);
 
-  function appendText(text, options = {}) {
-    if (!text) {
-      return;
-    }
-
-    const parent = currentParent();
-
-    const preserveWhitespace =
-      Boolean(options.preserveWhitespace) ||
-      PRESERVE_WHITESPACE_TAGS.has(parent.tag);
-
-    let content = decodeHtmlEntities(text);
-
-    if (!preserveWhitespace) {
-      content = content.replace(/\s+/g, " ").trim();
-    }
-
-    if (content === "") {
-      return;
-    }
-
-    const lastChild = parent.children[parent.children.length - 1];
-
-    if (lastChild && lastChild.type === "text") {
-      lastChild.content += content;
-      return;
-    }
-
-    parent.children.push({
-      type: "text",
-      content,
+    root.warnings.push({
+      message,
+      line: location.line,
+      column: location.column,
     });
   }
 
-  function closeElement(tagName) {
+ function appendText(text, options = {}) {
+  if (!text) {
+    return;
+  }
+
+  const parent = currentParent();
+
+  const preserveWhitespace =
+    Boolean(options.preserveWhitespace) ||
+    PRESERVE_WHITESPACE_TAGS.has(parent.tag);
+
+  const hadLeadingWhitespace = /^\s/.test(text);
+  const hadTrailingWhitespace = /\s$/.test(text);
+
+  let content = decodeHtmlEntities(text);
+
+  if (!preserveWhitespace) {
+    content = content.replace(/\s+/g, " ").trim();
+  }
+
+  if (content === "") {
+    return;
+  }
+
+  const lastChild = parent.children[parent.children.length - 1];
+
+  if (lastChild && lastChild.type === "text") {
+    const shouldInsertSpace =
+      !preserveWhitespace &&
+      (hadLeadingWhitespace || hadTrailingWhitespace) &&
+      !/\s$/.test(lastChild.content) &&
+      !/^\s/.test(content);
+
+    lastChild.content += shouldInsertSpace
+      ? ` ${content}`
+      : content;
+
+    return;
+  }
+
+  parent.children.push({
+    type: "text",
+    content,
+  });
+}
+
+  function closeElement(tagName, positionIndex = position) {
     const normalizedTagName = tagName.toLowerCase();
 
     for (let index = stack.length - 1; index > 0; index -= 1) {
@@ -281,7 +328,16 @@ function html2json(htmlText) {
             childIndex > index;
             childIndex -= 1
           ) {
-            addWarning(`Implicitly closed tag: <${stack[childIndex].tag}>`);
+            const elementPosition = stack[childIndex].position || {
+              line: 1,
+              column: 1,
+            };
+
+            root.warnings.push({
+              message: `Implicitly closed tag: <${stack[childIndex].tag}>`,
+              line: elementPosition.line,
+              column: elementPosition.column,
+            });
           }
         }
 
@@ -290,112 +346,151 @@ function html2json(htmlText) {
       }
     }
 
-    addWarning(`Unknown closing tag: </${normalizedTagName}>`);
+    addWarning(`Unknown closing tag: </${normalizedTagName}>`, positionIndex);
   }
 
- function consumeRawTextContent(
-  tagName,
-  startPosition
-) {
-  const closeTagPattern = new RegExp(
-    `</\\s*${escapeRegExp(
-      tagName
-    )}\\s*>`,
-    "i"
-  );
-
-  const remaining =
-    input.slice(startPosition);
-
-  const closeMatch =
-    remaining.match(closeTagPattern);
-
-  const ancestorClosingTag =
-    findAncestorClosingTag(remaining);
-
-  if (
-    !closeMatch ||
-    closeMatch.index === undefined
+  function consumeRawTextContent(
+    tagName,
+    startPosition
   ) {
-    addWarning(
-      `Unclosed raw-text tag: <${tagName}>`
+    const closeTagPattern = new RegExp(
+      `</\\s*${escapeRegExp(
+        tagName
+      )}\\s*>`,
+      "i"
     );
 
-    if (ancestorClosingTag) {
-      const rawText = remaining.slice(
-        0,
-        ancestorClosingTag.index
+    const remaining =
+      input.slice(startPosition);
+
+    const closeMatch =
+      remaining.match(closeTagPattern);
+
+    const ancestorClosingTag =
+      findAncestorClosingTag(remaining);
+
+    if (
+      !closeMatch ||
+      closeMatch.index === undefined
+    ) {
+      addWarning(
+        `Unclosed raw-text tag: <${tagName}>`,
+        startPosition
       );
 
-      appendText(rawText, {
+      if (ancestorClosingTag) {
+        const rawText = remaining.slice(
+          0,
+          ancestorClosingTag.index
+        );
+
+        appendText(rawText, {
+          preserveWhitespace: true,
+        });
+
+        stack.pop();
+
+        return (
+          startPosition +
+          ancestorClosingTag.index
+        );
+      }
+
+      appendText(remaining, {
         preserveWhitespace: true,
       });
 
       stack.pop();
 
-      return (
-        startPosition +
-        ancestorClosingTag.index
-      );
+      return input.length;
     }
 
-    appendText(remaining, {
+    const rawText = remaining.slice(
+      0,
+      closeMatch.index
+    );
+
+    appendText(rawText, {
       preserveWhitespace: true,
     });
 
     stack.pop();
 
-    return input.length;
-  }
+    return (
+      startPosition +
+      closeMatch.index +
+      closeMatch[0].length
+    );
 
-  const rawText = remaining.slice(
-    0,
-    closeMatch.index
-  );
+    function findAncestorClosingTag(text) {
+      const closingTagPattern =
+        /<\/\s*([a-zA-Z][a-zA-Z0-9:-]*)\s*>/g;
 
-  appendText(rawText, {
-    preserveWhitespace: true,
-  });
+      let match;
 
-  stack.pop();
-
-  return (
-    startPosition +
-    closeMatch.index +
-    closeMatch[0].length
-  );
-
-  function findAncestorClosingTag(text) {
-    const closingTagPattern =
-      /<\/\s*([a-zA-Z][a-zA-Z0-9:-]*)\s*>/g;
-
-    let match;
-
-    while (
-      (match = closingTagPattern.exec(text)) !== null
-    ) {
-      const closingTagName =
-        match[1].toLowerCase();
-
-      for (
-        let index = stack.length - 2;
-        index > 0;
-        index -= 1
+      while (
+        (match = closingTagPattern.exec(text)) !== null
       ) {
-        if (
-          stack[index].tag === closingTagName
+        const closingTagName =
+          match[1].toLowerCase();
+
+        for (
+          let index = stack.length - 2;
+          index > 0;
+          index -= 1
         ) {
-          return {
-            index: match.index,
-            tag: closingTagName,
-          };
+          if (
+            stack[index].tag === closingTagName
+          ) {
+            return {
+              index: match.index,
+              tag: closingTagName,
+            };
+          }
         }
       }
-    }
 
-    return null;
+      return null;
+    }
   }
 }
+
+function removeInternalPositions(node) {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+
+  delete node.position;
+
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      removeInternalPositions(child);
+    }
+  }
+}
+
+function getLineAndColumn(text, index) {
+  const safeIndex = Math.max(
+    0,
+    Math.min(index, text.length)
+  );
+
+  let line = 1;
+  let column = 1;
+
+  for (let i = 0; i < safeIndex; i += 1) {
+    if (text[i] === "\n") {
+      line += 1;
+      column = 1;
+    } else {
+      column += 1;
+    }
+  }
+
+  return {
+    line,
+    column,
+  };
 }
 
 function findUnquotedLessThan(input, startPosition, endPosition) {
@@ -662,11 +757,7 @@ function showExample1() {
 
   document.getElementById("html").value = htmlExample;
 
-  document.getElementById("json").textContent = JSON.stringify(
-    jsonContent,
-    null,
-    2
-  );
+  renderResult(jsonContent);
 }
 
 function showExample2() {
@@ -680,11 +771,7 @@ function showExample2() {
 
   document.getElementById("html").value = htmlExample;
 
-  document.getElementById("json").textContent = JSON.stringify(
-    jsonContent,
-    null,
-    2
-  );
+  renderResult(jsonContent);
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -692,5 +779,6 @@ if (typeof module !== "undefined" && module.exports) {
     html2json,
     parseAttributes,
     decodeHtmlEntities,
+    getLineAndColumn,
   };
 }
