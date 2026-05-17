@@ -293,19 +293,39 @@ function html2json(htmlText) {
     addWarning(`Unknown closing tag: </${normalizedTagName}>`);
   }
 
-  function consumeRawTextContent(tagName, startPosition) {
-    const closeTagPattern = new RegExp(
-      `</\\s*${escapeRegExp(tagName)}\\s*>`,
-      "i"
+ function consumeRawTextContent(
+  tagName,
+  startPosition
+) {
+  const closeTagPattern = new RegExp(
+    `</\\s*${escapeRegExp(
+      tagName
+    )}\\s*>`,
+    "i"
+  );
+
+  const remaining =
+    input.slice(startPosition);
+
+  const closeMatch =
+    remaining.match(closeTagPattern);
+
+  const ancestorClosingTag =
+    findAncestorClosingTag(remaining);
+
+  if (
+    !closeMatch ||
+    closeMatch.index === undefined
+  ) {
+    addWarning(
+      `Unclosed raw-text tag: <${tagName}>`
     );
 
-    const remaining = input.slice(startPosition);
-    const closeMatch = remaining.match(closeTagPattern);
-
-    if (!closeMatch || closeMatch.index === undefined) {
-      addWarning(`Unclosed raw-text tag: <${tagName}>`);
-
-      const rawText = input.slice(startPosition);
+    if (ancestorClosingTag) {
+      const rawText = remaining.slice(
+        0,
+        ancestorClosingTag.index
+      );
 
       appendText(rawText, {
         preserveWhitespace: true,
@@ -313,19 +333,69 @@ function html2json(htmlText) {
 
       stack.pop();
 
-      return input.length;
+      return (
+        startPosition +
+        ancestorClosingTag.index
+      );
     }
 
-    const rawText = remaining.slice(0, closeMatch.index);
-
-    appendText(rawText, {
+    appendText(remaining, {
       preserveWhitespace: true,
     });
 
     stack.pop();
 
-    return startPosition + closeMatch.index + closeMatch[0].length;
+    return input.length;
   }
+
+  const rawText = remaining.slice(
+    0,
+    closeMatch.index
+  );
+
+  appendText(rawText, {
+    preserveWhitespace: true,
+  });
+
+  stack.pop();
+
+  return (
+    startPosition +
+    closeMatch.index +
+    closeMatch[0].length
+  );
+
+  function findAncestorClosingTag(text) {
+    const closingTagPattern =
+      /<\/\s*([a-zA-Z][a-zA-Z0-9:-]*)\s*>/g;
+
+    let match;
+
+    while (
+      (match = closingTagPattern.exec(text)) !== null
+    ) {
+      const closingTagName =
+        match[1].toLowerCase();
+
+      for (
+        let index = stack.length - 2;
+        index > 0;
+        index -= 1
+      ) {
+        if (
+          stack[index].tag === closingTagName
+        ) {
+          return {
+            index: match.index,
+            tag: closingTagName,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+}
 }
 
 function findUnquotedLessThan(input, startPosition, endPosition) {
