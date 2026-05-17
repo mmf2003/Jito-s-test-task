@@ -1,36 +1,45 @@
 function convertHtml2JsonAndSet() {
-  const htmlTextAreaValue = document.getElementById("html").value;
-  const jsonObj = html2json(htmlTextAreaValue);
-  const jsonArea = document.getElementById("json");
+  const htmlTextAreaValue =
+    document.getElementById("html").value;
 
-  jsonArea.textContent = JSON.stringify(jsonObj, null, 2);
-}
+  const jsonObj = html2json(
+    htmlTextAreaValue
+  );
 
-/*
-  Converts an HTML string into a JSON tree without using:
-  - DOMParser
-  - document.createElement
-  - innerHTML
-  - third-party parser libraries
+  const jsonArea =
+    document.getElementById("json");
 
-  Output format:
-  {
-    type: "root",
-    children: [
-      {
-        type: "element",
-        tag: "div",
-        attributes: {},
-        children: [
-          {
-            type: "text",
-            content: "Hello"
-          }
-        ]
-      }
-    ]
+  const warningArea =
+    document.getElementById("warnings");
+
+  jsonArea.textContent = JSON.stringify(
+    jsonObj,
+    null,
+    2
+  );
+
+  if (
+    jsonObj.warnings &&
+    jsonObj.warnings.length > 0
+  ) {
+    warningArea.textContent =
+      "Warnings:\n\n" +
+      jsonObj.warnings.join("\n");
+
+    warningArea.style.color = "red";
+
+    jsonArea.style.backgroundColor =
+      "#d9b8b8";
+  } else {
+    warningArea.textContent =
+      "No warnings";
+
+    warningArea.style.color = "green";
+
+    jsonArea.style.backgroundColor =
+      "#e8ffe8";
   }
-*/
+}
 
 function html2json(htmlText) {
   const input =
@@ -39,140 +48,116 @@ function html2json(htmlText) {
       : String(htmlText ?? "");
 
   const VOID_TAGS = new Set([
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
   ]);
 
   const RAW_TEXT_TAGS = new Set([
-    "script",
-    "style",
-    "textarea",
-    "title",
+    "script", "style", "textarea", 
   ]);
 
   const PRESERVE_WHITESPACE_TAGS = new Set([
-    "pre",
-    "textarea",
-    "script",
-    "style",
+    "pre", "textarea", "script", "style",
   ]);
 
   const root = {
     type: "root",
     children: [],
+    warnings: [],
   };
 
   const stack = [root];
-
   let position = 0;
 
   while (position < input.length) {
     const nextTagStart = input.indexOf("<", position);
 
-    // No more tags
     if (nextTagStart === -1) {
       appendText(input.slice(position));
       break;
     }
 
-    // Text before tag
     if (nextTagStart > position) {
-      appendText(
-        input.slice(position, nextTagStart)
-      );
+      appendText(input.slice(position, nextTagStart));
     }
 
-    // HTML comments
     if (input.startsWith("<!--", nextTagStart)) {
-      const commentEnd = input.indexOf(
-        "-->",
-        nextTagStart + 4
-      );
+      const commentEnd = input.indexOf("-->", nextTagStart + 4);
 
-      position =
-        commentEnd === -1
-          ? input.length
-          : commentEnd + 3;
+      if (commentEnd === -1) {
+        addWarning("Unclosed HTML comment");
+      }
 
+      position = commentEnd === -1 ? input.length : commentEnd + 3;
       continue;
     }
 
-    // CDATA
     if (input.startsWith("<![CDATA[", nextTagStart)) {
-      const cdataEnd = input.indexOf(
-        "]]>",
-        nextTagStart + 9
-      );
+      const cdataEnd = input.indexOf("]]>", nextTagStart + 9);
 
       const cdataText =
         cdataEnd === -1
           ? input.slice(nextTagStart + 9)
-          : input.slice(
-              nextTagStart + 9,
-              cdataEnd
-            );
+          : input.slice(nextTagStart + 9, cdataEnd);
 
       appendText(cdataText, {
         preserveWhitespace: true,
       });
 
-      position =
-        cdataEnd === -1
-          ? input.length
-          : cdataEnd + 3;
+      if (cdataEnd === -1) {
+        addWarning("Unclosed CDATA section");
+      }
 
+      position = cdataEnd === -1 ? input.length : cdataEnd + 3;
       continue;
     }
 
-    // <!DOCTYPE ...>
     if (input.startsWith("<!", nextTagStart)) {
-      const declarationEnd = findTagEnd(
-        input,
-        nextTagStart + 2
-      );
+      const declarationEnd = findTagEnd(input, nextTagStart + 2);
 
-      position =
-        declarationEnd === -1
-          ? input.length
-          : declarationEnd + 1;
+      if (declarationEnd === -1) {
+        addWarning("Unclosed declaration");
+      }
 
+      position = declarationEnd === -1 ? input.length : declarationEnd + 1;
       continue;
     }
 
-    // <?xml ... ?>
     if (input.startsWith("<?", nextTagStart)) {
-      const instructionEnd = input.indexOf(
-        "?>",
-        nextTagStart + 2
-      );
+      const instructionEnd = input.indexOf("?>", nextTagStart + 2);
 
-      position =
-        instructionEnd === -1
-          ? input.length
-          : instructionEnd + 2;
+      if (instructionEnd === -1) {
+        addWarning("Unclosed processing instruction");
+      }
 
+      position = instructionEnd === -1 ? input.length : instructionEnd + 2;
       continue;
     }
 
-    const tagEnd = findTagEnd(
-      input,
-      nextTagStart + 1
-    );
+    const firstTagChar = input[nextTagStart + 1];
 
-    // Broken tag
-    if (tagEnd === -1) {
+    if (!firstTagChar || !/[a-zA-Z/]/.test(firstTagChar)) {
+      appendText("<");
+      position = nextTagStart + 1;
+      continue;
+    }
+
+    const tagEnd = findTagEnd(input, nextTagStart + 1);
+
+    const nestedTagStart =
+      tagEnd === -1
+        ? -1
+        : findUnquotedLessThan(input, nextTagStart + 1, tagEnd);
+
+    if (tagEnd === -1 || nestedTagStart !== -1) {
+      addWarning("Broken tag without closing >");
+
+      if (nestedTagStart !== -1) {
+        appendText(input.slice(nextTagStart, nestedTagStart));
+        position = nestedTagStart;
+        continue;
+      }
+
       appendText(input.slice(nextTagStart));
       break;
     }
@@ -181,40 +166,32 @@ function html2json(htmlText) {
       .slice(nextTagStart + 1, tagEnd)
       .trim();
 
-    // Empty tag <>
     if (!rawTagContent) {
-      appendText(
-        input.slice(nextTagStart, tagEnd + 1)
-      );
+      addWarning("Empty tag was treated as text");
+      appendText(input.slice(nextTagStart, tagEnd + 1));
 
       position = tagEnd + 1;
       continue;
     }
 
-    // Closing tag
     if (rawTagContent[0] === "/") {
-      const closingTagName = readTagName(
-        rawTagContent.slice(1)
-      ).toLowerCase();
+      const closingTagName = readTagName(rawTagContent.slice(1)).toLowerCase();
 
       if (closingTagName) {
         closeElement(closingTagName);
+      } else {
+        addWarning("Invalid closing tag was ignored");
       }
 
       position = tagEnd + 1;
       continue;
     }
 
-    // Opening tag
-    const parsedTag = parseOpeningTag(
-      rawTagContent
-    );
+    const parsedTag = parseOpeningTag(rawTagContent);
 
-    // Invalid tag
     if (!parsedTag) {
-      appendText(
-        input.slice(nextTagStart, tagEnd + 1)
-      );
+      addWarning(`Invalid tag was treated as text: <${rawTagContent}>`);
+      appendText(input.slice(nextTagStart, tagEnd + 1));
 
       position = tagEnd + 1;
       continue;
@@ -229,26 +206,23 @@ function html2json(htmlText) {
 
     currentParent().children.push(element);
 
-    const isVoid = VOID_TAGS.has(
-      parsedTag.tagName
-    );
-
-    const isSelfClosing =
-      parsedTag.selfClosing || isVoid;
+    const isVoid = VOID_TAGS.has(parsedTag.tagName);
+    const isSelfClosing = parsedTag.selfClosing || isVoid;
 
     position = tagEnd + 1;
 
     if (!isSelfClosing) {
       stack.push(element);
 
-      if (
-        RAW_TEXT_TAGS.has(parsedTag.tagName)
-      ) {
-        position = consumeRawTextContent(
-          parsedTag.tagName,
-          position
-        );
+      if (RAW_TEXT_TAGS.has(parsedTag.tagName)) {
+        position = consumeRawTextContent(parsedTag.tagName, position);
       }
+    }
+  }
+
+  if (stack.length > 1) {
+    for (let index = stack.length - 1; index > 0; index -= 1) {
+      addWarning(`Unclosed tag: <${stack[index].tag}>`);
     }
   }
 
@@ -256,6 +230,10 @@ function html2json(htmlText) {
 
   function currentParent() {
     return stack[stack.length - 1];
+  }
+
+  function addWarning(message) {
+    root.warnings.push(message);
   }
 
   function appendText(text, options = {}) {
@@ -271,25 +249,17 @@ function html2json(htmlText) {
 
     let content = decodeHtmlEntities(text);
 
-    // Normalize regular HTML whitespace
     if (!preserveWhitespace) {
-      content = content
-        .replace(/\s+/g, " ")
-        .trim();
+      content = content.replace(/\s+/g, " ").trim();
     }
 
     if (content === "") {
       return;
     }
 
-    const lastChild =
-      parent.children[parent.children.length - 1];
+    const lastChild = parent.children[parent.children.length - 1];
 
-    // Merge neighboring text nodes
-    if (
-      lastChild &&
-      lastChild.type === "text"
-    ) {
+    if (lastChild && lastChild.type === "text") {
       lastChild.content += content;
       return;
     }
@@ -301,52 +271,41 @@ function html2json(htmlText) {
   }
 
   function closeElement(tagName) {
-    const normalizedTagName =
-      tagName.toLowerCase();
+    const normalizedTagName = tagName.toLowerCase();
 
-    for (
-      let index = stack.length - 1;
-      index > 0;
-      index -= 1
-    ) {
-      if (
-        stack[index].tag ===
-        normalizedTagName
-      ) {
-        // Remove matched element
-        // and implicitly closed children
+    for (let index = stack.length - 1; index > 0; index -= 1) {
+      if (stack[index].tag === normalizedTagName) {
+        if (index < stack.length - 1) {
+          for (
+            let childIndex = stack.length - 1;
+            childIndex > index;
+            childIndex -= 1
+          ) {
+            addWarning(`Implicitly closed tag: <${stack[childIndex].tag}>`);
+          }
+        }
+
         stack.length = index;
         return;
       }
     }
 
-    // Unknown closing tag is ignored intentionally
+    addWarning(`Unknown closing tag: </${normalizedTagName}>`);
   }
 
-  function consumeRawTextContent(
-    tagName,
-    startPosition
-  ) {
+  function consumeRawTextContent(tagName, startPosition) {
     const closeTagPattern = new RegExp(
-      `</\\s*${escapeRegExp(
-        tagName
-      )}\\s*>`,
+      `</\\s*${escapeRegExp(tagName)}\\s*>`,
       "i"
     );
 
-    const remaining =
-      input.slice(startPosition);
+    const remaining = input.slice(startPosition);
+    const closeMatch = remaining.match(closeTagPattern);
 
-    const closeMatch =
-      remaining.match(closeTagPattern);
+    if (!closeMatch || closeMatch.index === undefined) {
+      addWarning(`Unclosed raw-text tag: <${tagName}>`);
 
-    // Unclosed raw-text tag
-    if (
-      !closeMatch ||
-      closeMatch.index === undefined
-    ) {
-      const rawText =
-        input.slice(startPosition);
+      const rawText = input.slice(startPosition);
 
       appendText(rawText, {
         preserveWhitespace: true,
@@ -357,10 +316,7 @@ function html2json(htmlText) {
       return input.length;
     }
 
-    const rawText = remaining.slice(
-      0,
-      closeMatch.index
-    );
+    const rawText = remaining.slice(0, closeMatch.index);
 
     appendText(rawText, {
       preserveWhitespace: true,
@@ -368,25 +324,16 @@ function html2json(htmlText) {
 
     stack.pop();
 
-    return (
-      startPosition +
-      closeMatch.index +
-      closeMatch[0].length
-    );
+    return startPosition + closeMatch.index + closeMatch[0].length;
   }
 }
 
-function findTagEnd(input, startPosition) {
+function findUnquotedLessThan(input, startPosition, endPosition) {
   let quote = null;
 
-  for (
-    let index = startPosition;
-    index < input.length;
-    index += 1
-  ) {
+  for (let index = startPosition; index < endPosition; index += 1) {
     const char = input[index];
 
-    // Inside quotes
     if (quote) {
       if (char === quote) {
         quote = null;
@@ -395,13 +342,38 @@ function findTagEnd(input, startPosition) {
       continue;
     }
 
-    // Opening quote
     if (char === '"' || char === "'") {
       quote = char;
       continue;
     }
 
-    // Tag end
+    if (char === "<") {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function findTagEnd(input, startPosition) {
+  let quote = null;
+
+  for (let index = startPosition; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
     if (char === ">") {
       return index;
     }
@@ -412,28 +384,15 @@ function findTagEnd(input, startPosition) {
 
 function parseOpeningTag(tagContent) {
   const trimmed = tagContent.trim();
+  const tagName = readTagName(trimmed).toLowerCase();
 
-  const tagName = readTagName(
-    trimmed
-  ).toLowerCase();
-
-  // Invalid tag name
-  if (
-    !tagName ||
-    !/^[a-zA-Z][a-zA-Z0-9:-]*$/.test(
-      tagName
-    )
-  ) {
+  if (!tagName || !/^[a-zA-Z][a-zA-Z0-9:-]*$/.test(tagName)) {
     return null;
   }
 
-  let rest = trimmed
-    .slice(tagName.length)
-    .trim();
-
+  let rest = trimmed.slice(tagName.length).trim();
   let selfClosing = false;
 
-  // <img />
   if (rest.endsWith("/")) {
     selfClosing = true;
     rest = rest.slice(0, -1).trim();
@@ -456,15 +415,10 @@ function readTagName(value) {
 
 function parseAttributes(attributesText) {
   const attributes = {};
-
   let index = 0;
 
   while (index < attributesText.length) {
-    // Skip spaces
-    while (
-      index < attributesText.length &&
-      /\s/.test(attributesText[index])
-    ) {
+    while (index < attributesText.length && /\s/.test(attributesText[index])) {
       index += 1;
     }
 
@@ -474,38 +428,26 @@ function parseAttributes(attributesText) {
 
     const nameStart = index;
 
-    // Read attribute name
     while (
       index < attributesText.length &&
-      !/[\s=/>]/.test(
-        attributesText[index]
-      )
+      !/[\s=/>]/.test(attributesText[index])
     ) {
       index += 1;
     }
 
-    const rawName =
-      attributesText.slice(
-        nameStart,
-        index
-      );
+    const rawName = attributesText.slice(nameStart, index);
 
     if (!rawName) {
       index += 1;
       continue;
     }
 
-    const attributeName =
-      rawName.toLowerCase();
+    const attributeName = rawName.toLowerCase();
 
-    while (
-      index < attributesText.length &&
-      /\s/.test(attributesText[index])
-    ) {
+    while (index < attributesText.length && /\s/.test(attributesText[index])) {
       index += 1;
     }
 
-    // Boolean attribute
     if (attributesText[index] !== "=") {
       attributes[attributeName] = true;
       continue;
@@ -513,25 +455,18 @@ function parseAttributes(attributesText) {
 
     index += 1;
 
-    while (
-      index < attributesText.length &&
-      /\s/.test(attributesText[index])
-    ) {
+    while (index < attributesText.length && /\s/.test(attributesText[index])) {
       index += 1;
     }
 
-    // Empty value
     if (index >= attributesText.length) {
       attributes[attributeName] = "";
       break;
     }
 
-    const quote =
-      attributesText[index];
-
+    const quote = attributesText[index];
     let value = "";
 
-    // Quoted value
     if (quote === '"' || quote === "'") {
       index += 1;
 
@@ -544,38 +479,25 @@ function parseAttributes(attributesText) {
         index += 1;
       }
 
-      value = attributesText.slice(
-        valueStart,
-        index
-      );
+      value = attributesText.slice(valueStart, index);
 
-      if (
-        attributesText[index] === quote
-      ) {
+      if (attributesText[index] === quote) {
         index += 1;
       }
     } else {
-      // Unquoted value
       const valueStart = index;
 
       while (
         index < attributesText.length &&
-        !/[\s>]/.test(
-          attributesText[index]
-        )
+        !/[\s>]/.test(attributesText[index])
       ) {
         index += 1;
       }
 
-      value = attributesText.slice(
-        valueStart,
-        index
-      );
+      value = attributesText.slice(valueStart, index);
     }
 
-    value = decodeHtmlEntities(value)
-      .replace(/\s+/g, " ")
-      .trim();
+    value = decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
 
     attributes[attributeName] = value;
   }
@@ -599,11 +521,8 @@ function decodeHtmlEntities(value) {
   return String(value).replace(
     /&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g,
     (match, entity) => {
-      // Numeric entity
       if (entity[0] === "#") {
-        const isHex =
-          entity[1] &&
-          entity[1].toLowerCase() === "x";
+        const isHex = entity[1] && entity[1].toLowerCase() === "x";
 
         const codePoint = parseInt(
           entity.slice(isHex ? 2 : 1),
@@ -612,9 +531,7 @@ function decodeHtmlEntities(value) {
 
         if (Number.isFinite(codePoint)) {
           try {
-            return String.fromCodePoint(
-              codePoint
-            );
+            return String.fromCodePoint(codePoint);
           } catch (error) {
             return match;
           }
@@ -623,10 +540,7 @@ function decodeHtmlEntities(value) {
         return match;
       }
 
-      return Object.prototype.hasOwnProperty.call(
-        entities,
-        entity
-      )
+      return Object.prototype.hasOwnProperty.call(entities, entity)
         ? entities[entity]
         : match;
     }
@@ -634,10 +548,7 @@ function decodeHtmlEntities(value) {
 }
 
 function escapeRegExp(value) {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function showExample1() {
@@ -679,12 +590,9 @@ function showExample1() {
 
   const jsonContent = html2json(htmlExample);
 
-  document.getElementById("html").value =
-    htmlExample;
+  document.getElementById("html").value = htmlExample;
 
-  document.getElementById(
-    "json"
-  ).textContent = JSON.stringify(
+  document.getElementById("json").textContent = JSON.stringify(
     jsonContent,
     null,
     2
@@ -700,22 +608,16 @@ function showExample2() {
 
   const jsonContent = html2json(htmlExample);
 
-  document.getElementById("html").value =
-    htmlExample;
+  document.getElementById("html").value = htmlExample;
 
-  document.getElementById(
-    "json"
-  ).textContent = JSON.stringify(
+  document.getElementById("json").textContent = JSON.stringify(
     jsonContent,
     null,
     2
   );
 }
 
-if (
-  typeof module !== "undefined" &&
-  module.exports
-) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     html2json,
     parseAttributes,
